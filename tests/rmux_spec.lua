@@ -1,6 +1,9 @@
 describe("rmux navigation", function()
   local current_window
+  local current_buffer
   local executable
+  local edit_commands
+  local modified
   local notifications
   local originals
   local rmux_commands
@@ -8,14 +11,20 @@ describe("rmux navigation", function()
 
   before_each(function()
     current_window = 1
+    current_buffer = 1
     executable = 1
+    edit_commands = {}
+    modified = false
     notifications = {}
     rmux_commands = {}
     window_moves = {}
 
     originals = {
       executable = vim.fn.executable,
+      get_current_buf = vim.api.nvim_get_current_buf,
       get_current_win = vim.api.nvim_get_current_win,
+      nvim_cmd = vim.api.nvim_cmd,
+      get_option_value = vim.api.nvim_get_option_value,
       notify = vim.notify,
       rmux = vim.env.RMUX,
       schedule = vim.schedule,
@@ -28,6 +37,17 @@ describe("rmux navigation", function()
     vim.env.TERM_PROGRAM = "rmux"
     vim.api.nvim_get_current_win = function()
       return current_window
+    end
+    vim.api.nvim_get_current_buf = function()
+      return current_buffer
+    end
+    vim.api.nvim_cmd = function(command)
+      table.insert(edit_commands, command)
+    end
+    vim.api.nvim_get_option_value = function(option, options)
+      assert.are.equal("modified", option)
+      assert.are.equal(current_buffer, options.buf)
+      return modified
     end
     vim.cmd.wincmd = function(key)
       table.insert(window_moves, key)
@@ -53,7 +73,10 @@ describe("rmux navigation", function()
   after_each(function()
     vim.env.RMUX = originals.rmux
     vim.env.TERM_PROGRAM = originals.term_program
+    vim.api.nvim_get_current_buf = originals.get_current_buf
     vim.api.nvim_get_current_win = originals.get_current_win
+    vim.api.nvim_cmd = originals.nvim_cmd
+    vim.api.nvim_get_option_value = originals.get_option_value
     vim.cmd.wincmd = originals.wincmd
     vim.fn.executable = originals.executable
     vim.notify = originals.notify
@@ -73,6 +96,9 @@ describe("rmux navigation", function()
     assert.is_true(moved)
     assert.are.equal("nvim", destination)
     assert.are.same({ "h" }, window_moves)
+    assert.are.same({
+      { cmd = "edit", bang = true },
+    }, edit_commands)
     assert.are.same({}, rmux_commands)
   end)
 
@@ -83,9 +109,27 @@ describe("rmux navigation", function()
     assert.is_true(moved)
     assert.are.equal("rmux", destination)
     assert.are.same({ "j" }, window_moves)
+    assert.are.same({}, edit_commands)
     assert.are.same({
       { "rmux", "select-pane", "-D" },
     }, rmux_commands)
+  end)
+
+  it("does not refresh a modified Neovim buffer", function()
+    modified = true
+    vim.cmd.wincmd = function(key)
+      table.insert(window_moves, key)
+      current_window = 2
+    end
+
+    local rmux = require("rmux")
+    local moved, destination = rmux.move_right()
+
+    assert.is_true(moved)
+    assert.are.equal("nvim", destination)
+    assert.are.same({ "l" }, window_moves)
+    assert.are.same({}, edit_commands)
+    assert.are.same({}, rmux_commands)
   end)
 
   it("maps all public directions", function()
