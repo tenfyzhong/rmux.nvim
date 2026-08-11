@@ -80,6 +80,11 @@ function M.move_to(direction)
   vim.cmd.wincmd(target.nvim)
 
   if vim.api.nvim_get_current_win() ~= previous_window then
+    local buffer = vim.api.nvim_get_current_buf()
+    local modified = vim.api.nvim_get_option_value("modified", { buf = buffer })
+    if not modified then
+      vim.api.nvim_cmd({ cmd = "edit", bang = true }, {})
+    end
     return true, "nvim"
   end
 
