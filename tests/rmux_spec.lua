@@ -3,20 +3,28 @@ describe("rmux navigation", function()
   local current_buffer
   local executable
   local edit_commands
+  local buftype
   local modified
   local notifications
   local originals
   local rmux_commands
   local window_moves
+  local events
+  local restored_views
+  local saved_view
 
   before_each(function()
     current_window = 1
     current_buffer = 1
+    buftype = ""
     executable = 1
     edit_commands = {}
+    events = {}
     modified = false
     notifications = {}
+    restored_views = {}
     rmux_commands = {}
+    saved_view = { lnum = 42, col = 3, topline = 30 }
     window_moves = {}
 
     originals = {
@@ -30,6 +38,8 @@ describe("rmux navigation", function()
       schedule = vim.schedule,
       system = vim.system,
       term_program = vim.env.TERM_PROGRAM,
+      winrestview = vim.fn.winrestview,
+      winsaveview = vim.fn.winsaveview,
       wincmd = vim.cmd.wincmd,
     }
 
@@ -43,17 +53,28 @@ describe("rmux navigation", function()
     end
     vim.api.nvim_cmd = function(command)
       table.insert(edit_commands, command)
+      table.insert(events, "edit")
     end
     vim.api.nvim_get_option_value = function(option, options)
-      assert.are.equal("modified", option)
       assert.are.equal(current_buffer, options.buf)
-      return modified
+      if option == "modified" then
+        return modified
+      end
+      return buftype
     end
     vim.cmd.wincmd = function(key)
       table.insert(window_moves, key)
     end
     vim.fn.executable = function()
       return executable
+    end
+    vim.fn.winrestview = function(view)
+      table.insert(events, "restore")
+      table.insert(restored_views, view)
+    end
+    vim.fn.winsaveview = function()
+      table.insert(events, "save")
+      return saved_view
     end
     vim.notify = function(message, level)
       table.insert(notifications, { message = message, level = level })
@@ -79,6 +100,8 @@ describe("rmux navigation", function()
     vim.api.nvim_get_option_value = originals.get_option_value
     vim.cmd.wincmd = originals.wincmd
     vim.fn.executable = originals.executable
+    vim.fn.winrestview = originals.winrestview
+    vim.fn.winsaveview = originals.winsaveview
     vim.notify = originals.notify
     vim.schedule = originals.schedule
     vim.system = originals.system
@@ -99,6 +122,44 @@ describe("rmux navigation", function()
     assert.are.same({
       { cmd = "edit", bang = true },
     }, edit_commands)
+    assert.are.same({}, rmux_commands)
+  end)
+
+  it("restores the last position after refreshing a Neovim buffer", function()
+    vim.cmd.wincmd = function(key)
+      table.insert(window_moves, key)
+      current_window = 2
+    end
+
+    local rmux = require("rmux")
+    local moved, destination = rmux.move_left()
+
+    assert.is_true(moved)
+    assert.are.equal("nvim", destination)
+    assert.are.same({ "h" }, window_moves)
+    assert.are.same({
+      { cmd = "edit", bang = true },
+    }, edit_commands)
+    assert.are.same({ saved_view }, restored_views)
+    assert.are.same({ "save", "edit", "restore" }, events)
+    assert.are.same({}, rmux_commands)
+  end)
+
+  it("does not refresh a non-file Neovim buffer", function()
+    buftype = "nofile"
+    vim.cmd.wincmd = function(key)
+      table.insert(window_moves, key)
+      current_window = 2
+    end
+
+    local rmux = require("rmux")
+    local moved, destination = rmux.move_right()
+
+    assert.is_true(moved)
+    assert.are.equal("nvim", destination)
+    assert.are.same({ "l" }, window_moves)
+    assert.are.same({}, edit_commands)
+    assert.are.same({}, events)
     assert.are.same({}, rmux_commands)
   end)
 

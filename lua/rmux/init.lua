@@ -82,8 +82,11 @@ function M.move_to(direction)
   if vim.api.nvim_get_current_win() ~= previous_window then
     local buffer = vim.api.nvim_get_current_buf()
     local modified = vim.api.nvim_get_option_value("modified", { buf = buffer })
-    if not modified then
+    local buftype = vim.api.nvim_get_option_value("buftype", { buf = buffer })
+    if not modified and buftype == "" then
+      local view = vim.fn.winsaveview()
       vim.api.nvim_cmd({ cmd = "edit", bang = true }, {})
+      vim.fn.winrestview(view)
     end
     return true, "nvim"
   end
